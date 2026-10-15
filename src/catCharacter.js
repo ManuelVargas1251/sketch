@@ -2,13 +2,26 @@
 import * as THREE from 'three';
 
 export function createCatCharacter() {
-  const GIF_URL = './src/assets/gif/b.gif';
+  const SHEET_URL = './src/assets/sprite/b.png';
+  const COLS = 5;
+  const ROWS = 9;
+  const FRAMES = COLS * ROWS;
+  const FPS = 12;
+
+  const sheetTexture = new THREE.TextureLoader().load(SHEET_URL);
+  sheetTexture.colorSpace = THREE.SRGBColorSpace;
+  sheetTexture.repeat.set(1 / COLS, 1 / ROWS);
+  sheetTexture.offset.set(0, 1 - 1 / ROWS);
+  // Nearest filtering keeps pixel edges crisp and stops neighbouring cells bleeding in
+  sheetTexture.magFilter = THREE.NearestFilter;
+  sheetTexture.minFilter = THREE.NearestFilter;
+  sheetTexture.generateMipmaps = false;
 
   // Configure material for high-quality transparent PNG rendering
   const catMaterial = new THREE.SpriteMaterial({
+    map: sheetTexture,
     transparent: true,
-    alphaTest: 0.1, // Prevents edge clipping artifacts
-    visible: false // Hidden until the first frame is ready
+    alphaTest: 0.1 // Prevents edge clipping artifacts
   });
 
   const catSprite = new THREE.Sprite(catMaterial);
@@ -17,66 +30,20 @@ export function createCatCharacter() {
   catSprite.scale.set(3, 3, 1);
   catSprite.position.set(0, 0, 0);
 
-  const frames = [];
-  const frameEnds = [];
-  let totalDuration = 0;
-  let currentFrame = -1;
-  let ctx = null;
-  let canvasTexture = null;
+  let currentFrame = 0;
 
-  function showTexture(texture) {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    catMaterial.map = texture;
-    catMaterial.visible = true;
-    catMaterial.needsUpdate = true;
-  }
+  function advanceSheet(time) {
+    const frame = Math.floor(time * FPS) % FRAMES;
+    if (frame === currentFrame) return;
 
-  async function loadGifFrames() {
-    if (!('ImageDecoder' in window)) {
-      showTexture(new THREE.TextureLoader().load(GIF_URL));
-      return;
-    }
-
-    const data = await (await fetch(GIF_URL)).arrayBuffer();
-    const decoder = new ImageDecoder({ data, type: 'image/gif' });
-    await decoder.tracks.ready;
-    const frameCount = decoder.tracks.selectedTrack.frameCount;
-
-    for (let i = 0; i < frameCount; i++) {
-      const { image } = await decoder.decode({ frameIndex: i });
-      frames.push(await createImageBitmap(image));
-      // VideoFrame.duration is in microseconds; some GIFs report 0, so floor at 20ms
-      totalDuration += Math.max(image.duration / 1000, 20);
-      frameEnds.push(totalDuration);
-      image.close();
-    }
-    decoder.close();
-
-    const canvas = document.createElement('canvas');
-    canvas.width = frames[0].width;
-    canvas.height = frames[0].height;
-    ctx = canvas.getContext('2d');
-    canvasTexture = new THREE.CanvasTexture(canvas);
-    showTexture(canvasTexture);
-  }
-
-  loadGifFrames().catch((err) => console.error('GIF load failed', err));
-
-  function advanceGif(time) {
-    if (!canvasTexture || frames.length < 2) return;
-
-    const t = (time * 1000) % totalDuration;
-    const index = frameEnds.findIndex((end) => t < end);
-    if (index === currentFrame) return;
-
-    currentFrame = index;
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.drawImage(frames[index], 0, 0);
-    canvasTexture.needsUpdate = true;
+    currentFrame = frame;
+    const col = frame % COLS;
+    const row = Math.floor(frame / COLS);
+    sheetTexture.offset.set(col / COLS, 1 - (row + 1) / ROWS);
   }
 
   function update(vocalVolume, time) {
-    advanceGif(time);
+    advanceSheet(time);
 
     // 1. Gentle idle breathing
     catSprite.position.y = Math.sin(time * 2) * 0.5;
